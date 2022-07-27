@@ -4,7 +4,7 @@ project(yolox LANGUAGES CUDA CXX)
 
 # add_definitions(-std=c++11)
 
-option(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
+#option(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_BUILD_TYPE Debug)
 
@@ -36,5 +36,11 @@ target_link_libraries(yolox
                     ${OpenCV_LIBS}
                     ${CUDA_LIBRARIES})
 
+add_executable(yolox-320x640 ${PROJECT_SOURCE_DIR}/yolox-320x640.cpp)
+
+target_link_libraries(yolox-320x640
+        nvinfer
+        ${OpenCV_LIBS}
+        ${CUDA_LIBRARIES})
 # add_definitions(-O2 -pthread)
 
