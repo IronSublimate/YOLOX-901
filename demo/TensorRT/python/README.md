@@ -26,9 +26,9 @@ YOLOX models can be easily conveted to TensorRT models using torch2trt
    ```
    For example:
    ```shell
-   python tools/trt.py -f /path/to/your/yolox/exps/yolox_s.py -c your_ckpt.pth
+   python tools/trt.py -f exps/example/custom/yolox_l-320x640.py -c yolox_l.pth
    ```
-   *yolox_s.py* can be any exp file modified by you.
+   *yolox_l.py* can be any exp file modified by you.
 
 The converted model and the serialized engine file (for C++ demo) will be saved on your experiment output dir.  
 
@@ -46,7 +46,7 @@ python tools/demo.py image -n yolox-s --trt --save_result
 ```
 or
 ```shell
-python tools/demo.py image -f exps/default/yolox_s.py --trt --save_result
+python tools/demo.py image -f exps/example/custom/yolox_l-320x640.py --trt --save_result
 ```
 
 320x640 For example
