@@ -67,10 +67,11 @@ def main():
 
     if not args.experiment_name:
         args.experiment_name = exp.exp_name
+    file_name = os.path.join(exp.output_dir, args.experiment_name)
+    os.makedirs(file_name, exist_ok=True)
 
     model = exp.get_model()
     if args.ckpt is None:
-        file_name = os.path.join(exp.output_dir, args.experiment_name)
         ckpt_file = os.path.join(file_name, "best_ckpt.pth")
     else:
         ckpt_file = args.ckpt
@@ -113,7 +114,7 @@ def main():
                                      dynamic_input_shape=args.dynamic,
                                      input_shapes=input_shapes)
         assert check, "Simplified ONNX model could not be validated"
-        onnx.save(model_simp, args.output_name)
+        onnx.save(model_simp, os.path.join(file_name, args.output_name))
         logger.info("generated simplified onnx model named {}".format(args.output_name))
 
 
