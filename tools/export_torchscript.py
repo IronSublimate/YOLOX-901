@@ -46,10 +46,11 @@ def main():
 
     if not args.experiment_name:
         args.experiment_name = exp.exp_name
+    file_name = os.path.join(exp.output_dir, args.experiment_name)
+    os.makedirs(file_name, exist_ok=True)
 
     model = exp.get_model()
     if args.ckpt is None:
-        file_name = os.path.join(exp.output_dir, args.experiment_name)
         ckpt_file = os.path.join(file_name, "best_ckpt.pth")
     else:
         ckpt_file = args.ckpt
@@ -67,7 +68,7 @@ def main():
     dummy_input = torch.randn(args.batch_size, 3, exp.test_size[0], exp.test_size[1])
 
     mod = torch.jit.trace(model, dummy_input)
-    mod.save(args.output_name)
+    mod.save(os.path.join(file_name, args.output_name))
     logger.info("generated torchscript model named {}".format(args.output_name))
 
 

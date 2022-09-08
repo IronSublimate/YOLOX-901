@@ -58,7 +58,7 @@ def main():
     model.eval()
     model.cuda()
     model.head.decode_in_inference = False
-    x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1], dtype=torch.int8).cuda()
+    x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1]).cuda()
     model_trt = torch2trt(
         model,
         [x],

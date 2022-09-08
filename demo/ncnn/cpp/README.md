@@ -3,7 +3,7 @@
 Cpp file compile of YOLOX object detection base on [ncnn](https://github.com/Tencent/ncnn).  
 YOLOX is included in ncnn now, you could also try building from ncnn, it's better.
 
-## Tutorial
+## Tutorial-Use ONNX
 
 ### Step1
 Clone [ncnn](https://github.com/Tencent/ncnn) first, then please following [build tutorial of ncnn](https://github.com/Tencent/ncnn/wiki/how-to-build) to build on your own device.
@@ -79,6 +79,68 @@ Inference image with executable file yolox, enjoy the detect result:
 ./yolox demo.jpg
 ```
 
+## Tutorial-Use PNNX
+
+### Step1
+Clone [ncnn](https://github.com/Tencent/ncnn) first, then please following [build tutorial of ncnn](https://github.com/Tencent/ncnn/wiki/how-to-build) and
+[build tutorial of pnnx](https://github.com/Tencent/ncnn/tree/master/tools/pnnx) to build on your own device.
+
+### Step2
+Use provided tools to generate torchscript file.
+For example, if you want to generate onnx file of yolox-s, please run the following command:
+```shell
+cd <path of yolox>
+python3 export_torchscript.py -n yolox-s -c yolox_s.pth
+```
+Then, a yolox.torchscript.pt file is generated.
+
+### Step3
+Generate ncnn param and bin file.
+```shell
+cd <path of ncnn>
+cd build/tools/ncnn
+<path to your pnnx>/pnnx YOLOX_outputs/yolox_s/yolox.torchscript.pt "inputshape=[1,3,640,640]"
+```
+Since Focus module is not supported in ncnn. Warnings like:
+```shell
+slice with step 2 is not supported
+```
+will be printed. However, don't  worry!  C++ version of Focus layer is already implemented in yolox-pnnx.cpp.
+
+### Step4
+Open **yolox.torchscript.ncnn.param**, and modify it.
+Before (just an example):
+```
+7767517
+224 257
+Input                    in0                      0 1 in0
+Split                    splitncnn_0              1 4 in0 1 2 3 4
+Crop                     slice_171                1 1 1 5
+Crop                     slice_170                1 1 2 6
+Crop                     slice_169                1 1 3 7
+Crop                     slice_168                1 1 4 8
+Concat                   cat_0                    4 1 8 6 7 5 9 0=0
+...
+```
+* Change first number for 224 to 224 - 5 = 219(since we will remove 6 layers and add 1 layers, total layers number should minus 5).
+* Then remove 6 lines of code from Split to Concat, but remember the last but 2nd number: 9.
+* Add YoloV5Focus layer After Input (using previous number 9):
+```
+YoloV5Focus      focus                    1 1 in0 9
+```
+After(just an example):
+```
+219 257
+Input                    in0                      0 1 in0
+YoloV5Focus              focus                    1 1 in0 9
+...
+```
+
+### Step6
+Copy or Move yolox-pnnx.cpp file into ncnn/examples, modify the CMakeList.txt, then build yolox
+
+### Step7
+Inference image with executable file yolox, enjoy the detect result:
 ## Acknowledgement
 
 * [ncnn](https://github.com/Tencent/ncnn)

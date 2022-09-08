@@ -19,12 +19,15 @@
 #if defined(USE_NCNN_SIMPLEOCV)
 #include "simpleocv.h"
 #else
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+
 #endif
-#include <float.h>
-#include <stdio.h>
+
+#include <cfloat>
+#include <cstdio>
 #include <vector>
 
 #define YOLOX_NMS_THRESH  0.45 // nms threshold
@@ -32,16 +35,13 @@
 #define YOLOX_TARGET_SIZE 640  // target image size after resize, might use 416 for small model
 
 // YOLOX use the same focus in yolov5
-class YoloV5Focus : public ncnn::Layer
-{
+class YoloV5Focus : public ncnn::Layer {
 public:
-    YoloV5Focus()
-    {
+    YoloV5Focus() {
         one_blob_only = true;
     }
 
-    virtual int forward(const ncnn::Mat& bottom_blob, ncnn::Mat& top_blob, const ncnn::Option& opt) const
-    {
+    int forward(const ncnn::Mat &bottom_blob, ncnn::Mat &top_blob, const ncnn::Option &opt) const override {
         int w = bottom_blob.w;
         int h = bottom_blob.h;
         int channels = bottom_blob.c;
@@ -54,16 +54,13 @@ public:
         if (top_blob.empty())
             return -100;
 
-        #pragma omp parallel for num_threads(opt.num_threads)
-        for (int p = 0; p < outc; p++)
-        {
-            const float* ptr = bottom_blob.channel(p % channels).row((p / channels) % 2) + ((p / channels) / 2);
-            float* outptr = top_blob.channel(p);
+#pragma omp parallel for num_threads(opt.num_threads)
+        for (int p = 0; p < outc; p++) {
+            const float *ptr = bottom_blob.channel(p % channels).row((p / channels) % 2) + ((p / channels) / 2);
+            float *outptr = top_blob.channel(p);
 
-            for (int i = 0; i < outh; i++)
-            {
-                for (int j = 0; j < outw; j++)
-                {
+            for (int i = 0; i < outh; i++) {
+                for (int j = 0; j < outw; j++) {
                     *outptr = *ptr;
 
                     outptr += 1;
@@ -80,42 +77,36 @@ public:
 
 DEFINE_LAYER_CREATOR(YoloV5Focus)
 
-struct Object
-{
+struct Object {
     cv::Rect_<float> rect;
     int label;
     float prob;
 };
 
-struct GridAndStride
-{
+struct GridAndStride {
     int grid0;
     int grid1;
     int stride;
 };
 
-static inline float intersection_area(const Object& a, const Object& b)
-{
+static inline float intersection_area(const Object &a, const Object &b) {
     cv::Rect_<float> inter = a.rect & b.rect;
     return inter.area();
 }
 
-static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
-{
+static void qsort_descent_inplace(std::vector<Object> &faceobjects, int left, int right) {
     int i = left;
     int j = right;
     float p = faceobjects[(left + right) / 2].prob;
 
-    while (i <= j)
-    {
+    while (i <= j) {
         while (faceobjects[i].prob > p)
             i++;
 
         while (faceobjects[j].prob < p)
             j--;
 
-        if (i <= j)
-        {
+        if (i <= j) {
             // swap
             std::swap(faceobjects[i], faceobjects[j]);
 
@@ -124,47 +115,42 @@ static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, in
         }
     }
 
-    #pragma omp parallel sections
+#pragma omp parallel sections
     {
-        #pragma omp section
+#pragma omp section
         {
             if (left < j) qsort_descent_inplace(faceobjects, left, j);
         }
-        #pragma omp section
+#pragma omp section
         {
             if (i < right) qsort_descent_inplace(faceobjects, i, right);
         }
     }
 }
 
-static void qsort_descent_inplace(std::vector<Object>& objects)
-{
+static void qsort_descent_inplace(std::vector<Object> &objects) {
     if (objects.empty())
         return;
 
     qsort_descent_inplace(objects, 0, objects.size() - 1);
 }
 
-static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vector<int>& picked, float nms_threshold)
-{
+static void nms_sorted_bboxes(const std::vector<Object> &faceobjects, std::vector<int> &picked, float nms_threshold) {
     picked.clear();
 
     const int n = faceobjects.size();
 
     std::vector<float> areas(n);
-    for (int i = 0; i < n; i++)
-    {
+    for (int i = 0; i < n; i++) {
         areas[i] = faceobjects[i].rect.area();
     }
 
-    for (int i = 0; i < n; i++)
-    {
-        const Object& a = faceobjects[i];
+    for (int i = 0; i < n; i++) {
+        const Object &a = faceobjects[i];
 
         int keep = 1;
-        for (int j = 0; j < (int)picked.size(); j++)
-        {
-            const Object& b = faceobjects[picked[j]];
+        for (int j = 0; j < (int) picked.size(); j++) {
+            const Object &b = faceobjects[picked[j]];
 
             // intersection over union
             float inter_area = intersection_area(a, b);
@@ -179,16 +165,13 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
     }
 }
 
-static void generate_grids_and_stride(const int target_size, std::vector<int>& strides, std::vector<GridAndStride>& grid_strides)
-{
-    for (int i = 0; i < (int)strides.size(); i++)
-    {
+static void
+generate_grids_and_stride(const int target_size, std::vector<int> &strides, std::vector<GridAndStride> &grid_strides) {
+    for (int i = 0; i < (int) strides.size(); i++) {
         int stride = strides[i];
         int num_grid = target_size / stride;
-        for (int g1 = 0; g1 < num_grid; g1++)
-        {
-            for (int g0 = 0; g0 < num_grid; g0++)
-            {
+        for (int g1 = 0; g1 < num_grid; g1++) {
+            for (int g0 = 0; g0 < num_grid; g0++) {
                 GridAndStride gs;
                 gs.grid0 = g0;
                 gs.grid1 = g1;
@@ -199,15 +182,15 @@ static void generate_grids_and_stride(const int target_size, std::vector<int>& s
     }
 }
 
-static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, const ncnn::Mat& feat_blob, float prob_threshold, std::vector<Object>& objects)
-{
-    const int num_grid = feat_blob.h;
-    const int num_class = feat_blob.w - 5;
+static void
+generate_yolox_proposals(std::vector<GridAndStride> grid_strides, const ncnn::Mat &feat_blob, float prob_threshold,
+                         std::vector<Object> &objects) {
+    const int num_grid = feat_blob.w;
+    const int num_class = feat_blob.h - 5;
     const int num_anchors = grid_strides.size();
 
-    const float* feat_ptr = feat_blob.channel(0);
-    for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++)
-    {
+    const float *feat_ptr = feat_blob.channel(0);
+    for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++) {
         const int grid0 = grid_strides[anchor_idx].grid0;
         const int grid1 = grid_strides[anchor_idx].grid1;
         const int stride = grid_strides[anchor_idx].stride;
@@ -215,20 +198,18 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, co
         // yolox/models/yolo_head.py decode logic
         //  outputs[..., :2] = (outputs[..., :2] + grids) * strides
         //  outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
-        float x_center = (feat_ptr[0] + grid0) * stride;
-        float y_center = (feat_ptr[1] + grid1) * stride;
-        float w = exp(feat_ptr[2]) * stride;
-        float h = exp(feat_ptr[3]) * stride;
+        float x_center = (feat_ptr[0 * num_grid] + grid0) * stride;
+        float y_center = (feat_ptr[1 * num_grid] + grid1) * stride;
+        float w = exp(feat_ptr[2 * num_grid]) * stride;
+        float h = exp(feat_ptr[3 * num_grid]) * stride;
         float x0 = x_center - w * 0.5f;
         float y0 = y_center - h * 0.5f;
 
-        float box_objectness = feat_ptr[4];
-        for (int class_idx = 0; class_idx < num_class; class_idx++)
-        {
-            float box_cls_score = feat_ptr[5 + class_idx];
+        float box_objectness = feat_ptr[4 * num_grid];
+        for (int class_idx = 0; class_idx < num_class; class_idx++) {
+            float box_cls_score = feat_ptr[(5 + class_idx) * num_grid];
             float box_prob = box_objectness * box_cls_score;
-            if (box_prob > prob_threshold)
-            {
+            if (box_prob > prob_threshold) {
                 Object obj;
                 obj.rect.x = x0;
                 obj.rect.y = y0;
@@ -241,16 +222,16 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, co
             }
 
         } // class loop
-        feat_ptr += feat_blob.w;
+        feat_ptr += 1;
 
     } // point anchor loop
 }
 
-static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const char* param_path, const char* model_path)
-{
+static int
+detect_yolox(const cv::Mat &bgr, std::vector<Object> &objects, const char *param_path, const char *model_path) {
     ncnn::Net yolox;
 
-    yolox.opt.use_vulkan_compute = true;
+    yolox.opt.use_vulkan_compute = false;
     // yolox.opt.use_bf16_storage = true;
 
     // Focus in yolov5
@@ -267,15 +248,12 @@ static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const 
     int w = img_w;
     int h = img_h;
     float scale = 1.f;
-    if (w > h)
-    {
-        scale = (float)YOLOX_TARGET_SIZE / w;
+    if (w > h) {
+        scale = (float) YOLOX_TARGET_SIZE / w;
         w = YOLOX_TARGET_SIZE;
         h = h * scale;
-    }
-    else
-    {
-        scale = (float)YOLOX_TARGET_SIZE / h;
+    } else {
+        scale = (float) YOLOX_TARGET_SIZE / h;
         h = YOLOX_TARGET_SIZE;
         w = w * scale;
     }
@@ -291,13 +269,13 @@ static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const 
 
     ncnn::Extractor ex = yolox.create_extractor();
 
-    ex.input("images", in_pad);
+    ex.input("in0", in_pad);
 
     std::vector<Object> proposals;
 
     {
         ncnn::Mat out;
-        ex.extract("output", out);
+        ex.extract("out0", out);
 
         static const int stride_arr[] = {8, 16, 32}; // might have stride=64 in YOLOX
         std::vector<int> strides(stride_arr, stride_arr + sizeof(stride_arr) / sizeof(stride_arr[0]));
@@ -316,8 +294,7 @@ static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const 
     int count = picked.size();
 
     objects.resize(count);
-    for (int i = 0; i < count; i++)
-    {
+    for (int i = 0; i < count; i++) {
         objects[i] = proposals[picked[i]];
 
         // adjust offset to original unpadded
@@ -327,10 +304,10 @@ static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const 
         float y1 = (objects[i].rect.y + objects[i].rect.height) / scale;
 
         // clip
-        x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
-        y0 = std::max(std::min(y0, (float)(img_h - 1)), 0.f);
-        x1 = std::max(std::min(x1, (float)(img_w - 1)), 0.f);
-        y1 = std::max(std::min(y1, (float)(img_h - 1)), 0.f);
+        x0 = std::max(std::min(x0, (float) (img_w - 1)), 0.f);
+        y0 = std::max(std::min(y0, (float) (img_h - 1)), 0.f);
+        x1 = std::max(std::min(x1, (float) (img_w - 1)), 0.f);
+        y1 = std::max(std::min(y1, (float) (img_h - 1)), 0.f);
 
         objects[i].rect.x = x0;
         objects[i].rect.y = y0;
@@ -341,25 +318,24 @@ static int detect_yolox(const cv::Mat& bgr, std::vector<Object>& objects, const 
     return 0;
 }
 
-static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects)
-{
-    static const char* class_names[] = {
-        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-        "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-        "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-        "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-        "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-        "hair drier", "toothbrush"
+static void draw_objects(const cv::Mat &bgr, const std::vector<Object> &objects) {
+    static const char *class_names[] = {
+            "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+            "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+            "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+            "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+            "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+            "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+            "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
+            "cell phone",
+            "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+            "hair drier", "toothbrush"
     };
 
     cv::Mat image = bgr.clone();
 
-    for (size_t i = 0; i < objects.size(); i++)
-    {
-        const Object& obj = objects[i];
+    for (size_t i = 0; i < objects.size(); i++) {
+        const Object &obj = objects[i];
 
         fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
                 obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
@@ -390,25 +366,22 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects)
     cv::waitKey(0);
 }
 
-int main(int argc, char** argv)
-{
-    if (argc != 4)
-    {
+int main(int argc, char **argv) {
+    if (argc != 4) {
         fprintf(stderr, "Usage: %s [image path] [param path] [model path]\n", argv[0]);
         return -1;
     }
 
-    const char* imagepath = argv[1];
+    const char *imagepath = argv[1];
 
     cv::Mat m = cv::imread(imagepath, 1);
-    if (m.empty())
-    {
+    if (m.empty()) {
         fprintf(stderr, "cv::imread %s failed\n", imagepath);
         return -1;
     }
 
     std::vector<Object> objects;
-    detect_yolox(m, objects,argv[2],argv[3]);
+    detect_yolox(m, objects, argv[2], argv[3]);
 
     draw_objects(m, objects);
 
