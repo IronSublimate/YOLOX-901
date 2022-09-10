@@ -83,13 +83,6 @@ def make_parser():
         action="store_true",
         help="Using TensorRT model for testing.",
     )
-    parser.add_argument(
-        "--script",
-        dest="script",
-        default=False,
-        action="store_true",
-        help="Using torchscript model for testing.",
-    )
     return parser
 
 
@@ -106,15 +99,15 @@ def get_image_list(path):
 
 class Predictor(object):
     def __init__(
-            self,
-            model,
-            exp,
-            cls_names=COCO_CLASSES,
-            trt_file=None,
-            decoder=None,
-            device="cpu",
-            fp16=False,
-            legacy=False,
+        self,
+        model,
+        exp,
+        cls_names=COCO_CLASSES,
+        trt_file=None,
+        decoder=None,
+        device="cpu",
+        fp16=False,
+        legacy=False,
     ):
         self.model = model
         self.cls_names = cls_names
@@ -126,6 +119,15 @@ class Predictor(object):
         self.device = device
         self.fp16 = fp16
         self.preproc = ValTransform(legacy=legacy)
+        if trt_file is not None:
+            from torch2trt import TRTModule
+
+            model_trt = TRTModule()
+            model_trt.load_state_dict(torch.load(trt_file))
+
+            x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1]).cuda()
+            self.model(x)
+            self.model = model_trt
 
     def inference(self, img):
         img_info = {"id": 0}
@@ -272,7 +274,7 @@ def main(exp, args):
             model.half()  # to FP16
     model.eval()
 
-    if not args.trt and not args.script:
+    if not args.trt:
         if args.ckpt is None:
             ckpt_file = os.path.join(file_name, "best_ckpt.pth")
         else:
@@ -296,32 +298,6 @@ def main(exp, args):
         model.head.decode_in_inference = False
         decoder = model.head.decode_outputs
         logger.info("Using TensorRT to inference")
-        from torch2trt import TRTModule
-
-        model_trt = TRTModule()
-        model_trt.load_state_dict(torch.load(trt_file))
-        x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1]).cuda()
-        model(x)
-        model = model_trt
-    elif args.script:
-        model.head.decode_in_inference = False
-        if args.ckpt is None:
-            ckpt_file = os.path.join(file_name, "yolox.torchscript.pt")
-        else:
-            ckpt_file = args.ckpt
-        logger.info("loading torchscript")
-        x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1])
-        if args.device == "gpu":
-            x = x.cuda()
-        model(x)
-        decoder = model.head.decode_outputs
-        # hw = model.head.hw
-        model = torch.jit.load(ckpt_file)
-        # load the model state dict
-        # model.head.strides = [8, 16, 32]
-        # model.head.hw = hw
-        logger.info("loaded torchscript done.")
-        trt_file = None
     else:
         trt_file = None
         decoder = None
