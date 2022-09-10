@@ -313,10 +313,10 @@ def main(exp, args):
         x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1])
         if args.device == "gpu":
             x = x.cuda()
-        model(x)
+        model(x)  # To add model.head.hw and model.head.stride
         decoder = model.head.decode_outputs
         # hw = model.head.hw
-        model = torch.jit.load(ckpt_file)
+        model = torch.jit.load(ckpt_file, map_location="cpu")
         # load the model state dict
         # model.head.strides = [8, 16, 32]
         # model.head.hw = hw
