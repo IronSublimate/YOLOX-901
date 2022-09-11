@@ -9,13 +9,27 @@ from loguru import logger
 
 import tensorrt as trt
 import torch
+from torch.utils.data import DataLoader, Dataset
 from torch2trt import torch2trt
 
 from yolox.exp import get_exp
 
 
+class DatasetAdapter(Dataset):
+    def __init__(self, dataset: Dataset):
+        self.ds = dataset
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, item):
+        img, target, img_info, img_id = self.ds[item]
+        image = img[None, ...]
+        return torch.from_numpy(image).cuda()
+
+
 def make_parser():
-    parser = argparse.ArgumentParser("YOLOX ncnn deploy")
+    parser = argparse.ArgumentParser("YOLOX tensorrt PTQ deploy")
     parser.add_argument("-expn", "--experiment-name", type=str, default=None)
     parser.add_argument("-n", "--name", type=str, default=None, help="model name")
 
@@ -34,7 +48,7 @@ def make_parser():
     return parser
 
 
-@logger.catch
+# @logger.catch
 @torch.no_grad()
 def main():
     args = make_parser().parse_args()
@@ -59,10 +73,16 @@ def main():
     model.cuda()
     model.head.decode_in_inference = False
     x = torch.ones(1, 3, exp.test_size[0], exp.test_size[1]).cuda()
+
+    dl = exp.get_evaluator(args.batch, False, False, False).dataloader
+    ds_adapter = DatasetAdapter(dl.dataset)
+    # dl_adapter = DataLoader(ds_adapter, batch_size=args.batch, num_workers=0)
+
     model_trt = torch2trt(
         model,
         [x],
         int8_mode=True,
+        int8_calib_dataset=ds_adapter,
         log_level=trt.Logger.INFO,
         max_workspace_size=(1 << args.workspace),
         max_batch_size=args.batch,
