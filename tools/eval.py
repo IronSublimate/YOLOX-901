@@ -7,6 +7,7 @@ import os
 import random
 import warnings
 from loguru import logger
+from torch2trt import TRTModule
 
 import torch
 import torch.backends.cudnn as cudnn
