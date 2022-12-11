@@ -8,3 +8,4 @@ class Exp(BDDExp):
         self.depth = 0.33
         self.width = 0.50
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+        self.test_size = (320, 640)
